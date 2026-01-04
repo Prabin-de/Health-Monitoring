@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Real-Time Health Monitoring</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #020617;
+  color: white;
+  text-align: center;
+  margin: 0;
+}
+h1 {
+  margin: 20px 0;
+}
+.card {
+  background: #1e293b;
+  margin: 10px auto;
+  padding: 15px;
+  width: 320px;
+  border-radius: 10px;
+  font-size: 20px;
+}
+.alert {
+  background: #dc2626;
+  padding: 10px;
+  margin: 15px auto;
+  width: 90%;
+  display: none;
+  border-radius: 8px;
+  font-weight: bold;
+}
+canvas {
+  background: white;
+  border-radius: 10px;
+  margin: 20px auto;
+  max-width: 95%;
+}
+</style>
+</head>
+
+<body>
+
+<h1>📡 Real-Time Health Dashboard</h1>
+
+<div class="card">❤️ BPM: <span id="bpm">--</span></div>
+<div class="card">🩸 SpO₂: <span id="spo2">--</span> %</div>
+<div class="card">🌡 Temperature: <span id="temp">--</span> °C</div>
+<div class="card">⏱ Last Updated: <span id="lastUpdate">--</span></div>
+
+<div class="alert" id="alertBox">⚠ Abnormal Values Detected!</div>
+
+<canvas id="bpmChart"></canvas>
+<canvas id="spo2Chart"></canvas>
+<canvas id="tempChart"></canvas>
+
+<script>
+/* =======================
+   THINGSPEAK CONFIG
+======================= */
+const CHANNEL_ID = "3205334";
+const READ_API_KEY = "F1QQTII84R0NG0FX";
+
+/* =======================
+   CHART SETUP
+======================= */
+const labels = [];
+
+function createChart(ctx, label, color) {
+  return new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: label,
+        data: [],
+        borderColor: color,
+        backgroundColor: color,
+        fill: false,
+        tension: 0.3,
+        pointRadius: 3
+      }]
+    },
+    options: {
+      responsive: true,
+      animation: { duration: 400 },
+      scales: {
+        y: { beginAtZero: true }
+      }
+    }
+  });
+}
+
+const bpmChart  = createChart(bpmChartCtx = document.getElementById('bpmChart'),  'BPM', 'red');
+const spo2Chart = createChart(spo2ChartCtx = document.getElementById('spo2Chart'), 'SpO₂ (%)', 'green');
+const tempChart = createChart(tempChartCtx = document.getElementById('tempChart'), 'Temperature (°C)', 'orange');
+
+/* =======================
+   DATA FETCH FUNCTION
+======================= */
+async function fetchData() {
+  try {
+    const url = `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds/last.json?api_key=${READ_API_KEY}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    /* ✅ CORRECT FIELD MAPPING */
+    const temperature = parseFloat(data.field1);
+    const spo2        = parseFloat(data.field2);
+    const bpm         = parseFloat(data.field3);
+
+    if (isNaN(temperature) || isNaN(spo2) || isNaN(bpm)) {
+      console.warn("Invalid sensor data received");
+      return;
+    }
+
+    /* UPDATE UI */
+    document.getElementById("bpm").innerText  = bpm.toFixed(0);
+    document.getElementById("spo2").innerText = spo2.toFixed(0);
+    document.getElementById("temp").innerText = temperature.toFixed(2);
+
+    const time = new Date().toLocaleTimeString();
+    document.getElementById("lastUpdate").innerText = time;
+
+    /* UPDATE CHARTS */
+    labels.push(time);
+    bpmChart.data.datasets[0].data.push(bpm);
+    spo2Chart.data.datasets[0].data.push(spo2);
+    tempChart.data.datasets[0].data.push(temperature);
+
+    if (labels.length > 10) {
+      labels.shift();
+      bpmChart.data.datasets[0].data.shift();
+      spo2Chart.data.datasets[0].data.shift();
+      tempChart.data.datasets[0].data.shift();
+    }
+
+    bpmChart.update();
+    spo2Chart.update();
+    tempChart.update();
+
+    /* ALERT LOGIC (MEDICAL-SAFE RANGES) */
+    const alertBox = document.getElementById("alertBox");
+
+    const abnormal =
+      bpm < 50 || bpm > 120 ||
+      spo2 < 92 ||
+      temperature > 38;
+
+    alertBox.style.display = abnormal ? "block" : "none";
+
+  } catch (error) {
+    console.error("ThingSpeak fetch error:", error);
+  }
+}
+
+/* =======================
+   AUTO REFRESH
+======================= */
+fetchData();
+setInterval(fetchData, 15000);
+</script>
+
+</body>
+</html>
