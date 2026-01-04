@@ -2,168 +2,233 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Real-Time Health Monitoring</title>
+<title>Patient Health Dashboard</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
 <style>
-body {
-  font-family: Arial, sans-serif;
-  background: #020617;
-  color: white;
-  text-align: center;
-  margin: 0;
-}
-h1 {
-  margin: 20px 0;
-}
-.card {
-  background: #1e293b;
-  margin: 10px auto;
-  padding: 15px;
-  width: 320px;
-  border-radius: 10px;
-  font-size: 20px;
-}
-.alert {
-  background: #dc2626;
-  padding: 10px;
-  margin: 15px auto;
-  width: 90%;
-  display: none;
-  border-radius: 8px;
-  font-weight: bold;
-}
-canvas {
-  background: white;
-  border-radius: 10px;
-  margin: 20px auto;
-  max-width: 95%;
-}
+body { font-family: Arial, sans-serif; margin:0; background:#020617; color:white; text-align:center; }
+h1,h2,h3 { margin:10px 0; }
+input { padding:10px; border-radius:8px; border:none; width:80%; margin:10px 0; }
+button { cursor:pointer; padding:8px 16px; border-radius:8px; border:none; margin:5px; }
+.hidden { display:none; }
+.alert { background:#dc2626; padding:10px; margin:10px auto; width:90%; display:none; border-radius:8px; font-weight:bold; }
+.card { background:#1e293b; margin:10px auto; padding:15px; width:320px; border-radius:10px; font-size:18px; cursor:pointer; transition:0.3s; }
+.card:hover { box-shadow:0 0 15px #00f; }
+.trend-up { color:limegreen; font-weight:bold; }
+.trend-down { color:red; font-weight:bold; }
+.trend-neutral { color:gray; font-weight:bold; }
+.filter-btn { background:#1e293b; color:white; }
+.filter-btn.active { background:limegreen; color:black; }
+#vital-chart { border-radius:10px; }
+.value-time { font-size:16px; margin:2px 0; }
+#report-header { display:flex; flex-direction:column; align-items:center; }
+#chart-container { width:95vw; height:70vh; margin:10px auto; }
 </style>
 </head>
-
 <body>
 
-<h1>📡 Real-Time Health Dashboard</h1>
+<!-- ================= PATIENT INPUT PAGE ================= -->
+<div id="patient-page" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;">
+  <h1>Enter Patient Name</h1>
+  <input type="text" id="patientName" placeholder="Patient Name">
+  <button onclick="startDashboard()">Start Monitoring</button>
+</div>
 
-<div class="card">❤️ BPM: <span id="bpm">--</span></div>
-<div class="card">🩸 SpO₂: <span id="spo2">--</span> %</div>
-<div class="card">🌡 Temperature: <span id="temp">--</span> °C</div>
-<div class="card">⏱ Last Updated: <span id="lastUpdate">--</span></div>
+<!-- ================= DASHBOARD PAGE ================= -->
+<div id="dashboard-page" class="hidden">
+  <h1>📡 Patient Health Dashboard</h1>
+  <h2 id="patient-display">Patient: --</h2>
+  <div id="alertBox" class="alert">⚠ Abnormal Values Detected!</div>
 
-<div class="alert" id="alertBox">⚠ Abnormal Values Detected!</div>
+  <div class="card" onclick="showReport('BPM',3,50,120)">❤️ BPM: <span id="bpm">--</span> <span id="bpm-trend" class="trend-neutral">→</span></div>
+  <div class="card" onclick="showReport('SpO₂',2,92,100)">🩸 SpO₂: <span id="spo2">--</span>% <span id="spo2-trend" class="trend-neutral">→</span></div>
+  <div class="card" onclick="showReport('Temperature',1,36,38)">🌡 Temp: <span id="temp">--</span>°C <span id="temp-trend" class="trend-neutral">→</span></div>
+  <div class="card" onclick="showReport('Acceleration',4,0,20)">⏱ Acceleration: <span id="acc">--</span> m/s² <span id="acc-trend" class="trend-neutral">→</span></div>
 
-<canvas id="bpmChart"></canvas>
-<canvas id="spo2Chart"></canvas>
-<canvas id="tempChart"></canvas>
+  <button onclick="resetPatient()">Change Patient</button>
+</div>
+
+<!-- ================= MEDICAL REPORT PAGE ================= -->
+<div id="report-page" class="hidden">
+  <div id="report-header">
+    <h1>Medical Report</h1>
+    <h2 id="report-patient">Patient: --</h2>
+    <h2 id="report-vital">Vital: --</h2>
+    <p class="value-time" id="report-value">Latest Value: --</p>
+    <p class="value-time" id="report-time">Last Updated: --</p>
+    <p id="report-interpretation">Interpretation: --</p>
+  </div>
+  <div>
+    <button class="filter-btn active" onclick="loadHistory('today')">Today</button>
+    <button class="filter-btn" onclick="loadHistory('week')">This Week</button>
+    <button class="filter-btn" onclick="loadHistory('all')">All</button>
+  </div>
+  <div id="chart-container">
+    <canvas id="vital-chart"></canvas>
+  </div>
+  <button onclick="backToDashboard()">Back to Dashboard</button>
+</div>
 
 <script>
-/* =======================
-   THINGSPEAK CONFIG
-======================= */
-const CHANNEL_ID = "3205334";
-const READ_API_KEY = "F1QQTII84R0NG0FX";
+const CHANNEL_ID="3205334";
+const READ_KEY="F1QQTII84R0NG0FX";
+let lastValues={1:null,2:null,3:null,4:null};
+let patientName="--";
+let vitalField=1;
+let vitalMin=0,vitalMax=0;
+let vitalChart;
 
-/* =======================
-   CHART SETUP
-======================= */
-const labels = [];
+// ================= PATIENT =================
+function startDashboard(){
+  const name=document.getElementById('patientName').value.trim();
+  if(!name){ alert("Please enter patient name"); return; }
+  patientName=name;
+  document.getElementById('patient-display').innerText="Patient: "+patientName;
+  document.getElementById('patient-page').classList.add('hidden');
+  document.getElementById('dashboard-page').classList.remove('hidden');
+  fetchDashboard();
+  setInterval(fetchDashboard,15000);
+}
+function resetPatient(){
+  document.getElementById('dashboard-page').classList.add('hidden');
+  document.getElementById('patient-page').classList.remove('hidden');
+}
 
-function createChart(ctx, label, color) {
-  return new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: label,
-        data: [],
-        borderColor: color,
-        backgroundColor: color,
-        fill: false,
-        tension: 0.3,
-        pointRadius: 3
-      }]
-    },
-    options: {
-      responsive: true,
-      animation: { duration: 400 },
-      scales: {
-        y: { beginAtZero: true }
+// ================= DASHBOARD =================
+async function fetchDashboard(){
+  try{
+    const res=await fetch(`https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json?api_key=${READ_KEY}&results=2`);
+    const data=await res.json();
+    if(!data.feeds || data.feeds.length<2) return;
+    const prev=data.feeds[0];
+    const latest=data.feeds[1];
+    const fields=[1,2,3,4];
+    fields.forEach(f=>{
+      const latestVal=parseFloat(latest[`field${f}`]);
+      const prevVal=parseFloat(prev[`field${f}`]);
+      let trend=prevVal? (latestVal>prevVal?"↑":latestVal<prevVal?"↓":"→"):"→";
+      lastValues[f]=latestVal;
+      let valueEl, trendEl;
+      if(f===1){ valueEl=document.getElementById('temp'); trendEl=document.getElementById('temp-trend'); }
+      if(f===2){ valueEl=document.getElementById('spo2'); trendEl=document.getElementById('spo2-trend'); }
+      if(f===3){ valueEl=document.getElementById('bpm'); trendEl=document.getElementById('bpm-trend'); }
+      if(f===4){ valueEl=document.getElementById('acc'); trendEl=document.getElementById('acc-trend'); }
+      valueEl.innerText=latestVal;
+      trendEl.innerText=trend;
+      trendEl.className=trend==="↑"?"trend-up":trend==="↓"?"trend-down":"trend-neutral";
+    });
+
+    const alertBox=document.getElementById('alertBox');
+    const abnormalBPM=lastValues[3]<50 || lastValues[3]>120;
+    const abnormalSpO2=lastValues[2]<92;
+    const abnormalTemp=lastValues[1]>38;
+    const abnormalAcc=lastValues[4]>20;
+    let alertText="";
+    if(abnormalBPM) alertText+="BPM "; 
+    if(abnormalSpO2) alertText+="SpO₂ "; 
+    if(abnormalTemp) alertText+="Temp "; 
+    if(abnormalAcc) alertText+="Acceleration ";
+    alertBox.innerText=alertText?`⚠ Abnormal: ${alertText}`:"";
+    alertBox.style.display=alertText?"block":"none";
+
+  } catch(err){ console.error("Dashboard fetch error:",err); }
+}
+
+// ================= MEDICAL REPORT =================
+function showReport(vitalName,fieldNum,minVal,maxVal){
+  vitalField=fieldNum;
+  vitalMin=minVal;
+  vitalMax=maxVal;
+  document.getElementById('dashboard-page').classList.add('hidden');
+  document.getElementById('report-page').classList.remove('hidden');
+  document.getElementById('report-patient').innerText="Patient: "+patientName;
+  document.getElementById('report-vital').innerText="Vital: "+vitalName;
+  const value=lastValues[fieldNum]!==null?lastValues[fieldNum]:"--";
+  document.getElementById('report-value').innerText="Latest Value: "+value;
+  const time= new Date().toLocaleString();
+  document.getElementById('report-time').innerText="Last Updated: "+time;
+
+  let interpretation="Normal";
+  if(vitalName==="BPM") interpretation=(value<50||value>120)?"Abnormal BPM":"Normal BPM";
+  if(vitalName==="SpO₂") interpretation=(value<92)?"Low SpO₂":"Normal SpO₂";
+  if(vitalName==="Temperature") interpretation=(value>38)?"High Temperature":"Normal Temperature";
+  if(vitalName==="Acceleration") interpretation=(value>20)?"High Activity":"Normal Activity";
+  document.getElementById('report-interpretation').innerText="Interpretation: "+interpretation;
+
+  loadHistory('today'); // default
+}
+
+function backToDashboard(){
+  document.getElementById('report-page').classList.add('hidden');
+  document.getElementById('dashboard-page').classList.remove('hidden');
+}
+
+// ================= HISTORY CHART =================
+async function loadHistory(range){
+  const buttons=document.querySelectorAll('.filter-btn');
+  buttons.forEach(b=>b.classList.remove('active'));
+  if(range==='today') buttons[0].classList.add('active');
+  if(range==='week') buttons[1].classList.add('active');
+  if(range==='all') buttons[2].classList.add('active');
+
+  let results=50;
+  if(range==='week') results=200;
+  if(range==='all') results=800;
+
+  try{
+    const res=await fetch(`https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json?api_key=${READ_KEY}&results=${results}`);
+    const data=await res.json();
+    const values=data.feeds.map(f=>parseFloat(f[`field${vitalField}`]));
+    const labels=data.feeds.map(f=>new Date(f.created_at).toLocaleString());
+
+    const pointBg = values.map(v=> (v<vitalMin||v>vitalMax)?'red':'lime');
+
+    const ctx=document.getElementById('vital-chart').getContext('2d');
+    if(vitalChart) vitalChart.destroy();
+    vitalChart=new Chart(ctx,{
+      type:'line',
+      data:{
+        labels:labels,
+        datasets:[{
+          label:'History',
+          data:values,
+          borderColor:'lime',
+          backgroundColor:'rgba(0,255,0,0.2)',
+          pointBackgroundColor:pointBg,
+          fill:true,
+          tension:0.3,
+          pointRadius:4
+        }]
+      },
+      options:{
+        responsive:true,
+        maintainAspectRatio:false,
+        scales:{
+          y:{ 
+            beginAtZero:false,
+            suggestedMin:vitalMin-5,
+            suggestedMax:vitalMax+5,
+            title:{ display:true, text:'Value'}
+          },
+          x:{
+            title:{ display:true, text:'Time'}
+          }
+        },
+        plugins:{
+          tooltip:{
+            callbacks:{
+              label:function(ctx){
+                return ctx.parsed.y+" at "+ctx.label;
+              }
+            }
+          },
+          legend:{ display:false }
+        }
       }
-    }
-  });
+    });
+
+  } catch(err){ console.error("History fetch error:",err);}
 }
-
-const bpmChart  = createChart(bpmChartCtx = document.getElementById('bpmChart'),  'BPM', 'red');
-const spo2Chart = createChart(spo2ChartCtx = document.getElementById('spo2Chart'), 'SpO₂ (%)', 'green');
-const tempChart = createChart(tempChartCtx = document.getElementById('tempChart'), 'Temperature (°C)', 'orange');
-
-/* =======================
-   DATA FETCH FUNCTION
-======================= */
-async function fetchData() {
-  try {
-    const url = `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds/last.json?api_key=${READ_API_KEY}`;
-    const response = await fetch(url);
-    const data = await response.json();
-
-    /* ✅ CORRECT FIELD MAPPING */
-    const temperature = parseFloat(data.field1);
-    const spo2        = parseFloat(data.field2);
-    const bpm         = parseFloat(data.field3);
-
-    if (isNaN(temperature) || isNaN(spo2) || isNaN(bpm)) {
-      console.warn("Invalid sensor data received");
-      return;
-    }
-
-    /* UPDATE UI */
-    document.getElementById("bpm").innerText  = bpm.toFixed(0);
-    document.getElementById("spo2").innerText = spo2.toFixed(0);
-    document.getElementById("temp").innerText = temperature.toFixed(2);
-
-    const time = new Date().toLocaleTimeString();
-    document.getElementById("lastUpdate").innerText = time;
-
-    /* UPDATE CHARTS */
-    labels.push(time);
-    bpmChart.data.datasets[0].data.push(bpm);
-    spo2Chart.data.datasets[0].data.push(spo2);
-    tempChart.data.datasets[0].data.push(temperature);
-
-    if (labels.length > 10) {
-      labels.shift();
-      bpmChart.data.datasets[0].data.shift();
-      spo2Chart.data.datasets[0].data.shift();
-      tempChart.data.datasets[0].data.shift();
-    }
-
-    bpmChart.update();
-    spo2Chart.update();
-    tempChart.update();
-
-    /* ALERT LOGIC (MEDICAL-SAFE RANGES) */
-    const alertBox = document.getElementById("alertBox");
-
-    const abnormal =
-      bpm < 50 || bpm > 120 ||
-      spo2 < 92 ||
-      temperature > 38;
-
-    alertBox.style.display = abnormal ? "block" : "none";
-
-  } catch (error) {
-    console.error("ThingSpeak fetch error:", error);
-  }
-}
-
-/* =======================
-   AUTO REFRESH
-======================= */
-fetchData();
-setInterval(fetchData, 15000);
 </script>
 
 </body>
