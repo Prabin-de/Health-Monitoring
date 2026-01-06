@@ -40,10 +40,12 @@ button { cursor:pointer; padding:8px 16px; border-radius:8px; border:none; margi
   <h2 id="patient-display">Patient: --</h2>
   <div id="alertBox" class="alert">⚠ Abnormal Values Detected!</div>
 
-  <div class="card" onclick="showReport('BPM',3,50,120)">❤️ BPM: <span id="bpm">--</span> <span id="bpm-trend" class="trend-neutral">→</span></div>
+  <div class="card" onclick="showReport('Body Temp',1,36,38)">🌡 Body Temp: <span id="temp">--</span>°C <span id="temp-trend" class="trend-neutral">→</span></div>
   <div class="card" onclick="showReport('SpO₂',2,92,100)">🩸 SpO₂: <span id="spo2">--</span>% <span id="spo2-trend" class="trend-neutral">→</span></div>
-  <div class="card" onclick="showReport('Temperature',1,36,38)">🌡 Temp: <span id="temp">--</span>°C <span id="temp-trend" class="trend-neutral">→</span></div>
+  <div class="card" onclick="showReport('BPM',3,50,120)">❤️ BPM: <span id="bpm">--</span> <span id="bpm-trend" class="trend-neutral">→</span></div>
   <div class="card" onclick="showReport('Acceleration',4,0,20)">⏱ Acceleration: <span id="acc">--</span> m/s² <span id="acc-trend" class="trend-neutral">→</span></div>
+  <div class="card" onclick="showReport('Room Temp',5,20,30)">🏠 Room Temp: <span id="roomTemp">--</span>°C <span id="roomTemp-trend" class="trend-neutral">→</span></div>
+  <div class="card" onclick="showReport('Humidity',6,30,70)">💧 Humidity: <span id="humidity">--</span>% <span id="humidity-trend" class="trend-neutral">→</span></div>
 
   <button onclick="resetPatient()">Change Patient</button>
 </div>
@@ -70,9 +72,9 @@ button { cursor:pointer; padding:8px 16px; border-radius:8px; border:none; margi
 </div>
 
 <script>
-const CHANNEL_ID="3205334";
-const READ_KEY="F1QQTII84R0NG0FX";
-let lastValues={1:null,2:null,3:null,4:null};
+const CHANNEL_ID="3205334"; // Your ThingSpeak Channel ID
+const READ_KEY="F1QQTII84R0NG0FX"; // Your read API key
+let lastValues={1:null,2:null,3:null,4:null,5:null,6:null};
 let patientName="--";
 let vitalField=1;
 let vitalMin=0,vitalMax=0;
@@ -102,7 +104,7 @@ async function fetchDashboard(){
     if(!data.feeds || data.feeds.length<2) return;
     const prev=data.feeds[0];
     const latest=data.feeds[1];
-    const fields=[1,2,3,4];
+    const fields=[1,2,3,4,5,6];
     fields.forEach(f=>{
       const latestVal=parseFloat(latest[`field${f}`]);
       const prevVal=parseFloat(prev[`field${f}`]);
@@ -113,21 +115,21 @@ async function fetchDashboard(){
       if(f===2){ valueEl=document.getElementById('spo2'); trendEl=document.getElementById('spo2-trend'); }
       if(f===3){ valueEl=document.getElementById('bpm'); trendEl=document.getElementById('bpm-trend'); }
       if(f===4){ valueEl=document.getElementById('acc'); trendEl=document.getElementById('acc-trend'); }
+      if(f===5){ valueEl=document.getElementById('roomTemp'); trendEl=document.getElementById('roomTemp-trend'); }
+      if(f===6){ valueEl=document.getElementById('humidity'); trendEl=document.getElementById('humidity-trend'); }
       valueEl.innerText=latestVal;
       trendEl.innerText=trend;
       trendEl.className=trend==="↑"?"trend-up":trend==="↓"?"trend-down":"trend-neutral";
     });
 
     const alertBox=document.getElementById('alertBox');
-    const abnormalBPM=lastValues[3]<50 || lastValues[3]>120;
-    const abnormalSpO2=lastValues[2]<92;
-    const abnormalTemp=lastValues[1]>38;
-    const abnormalAcc=lastValues[4]>20;
     let alertText="";
-    if(abnormalBPM) alertText+="BPM "; 
-    if(abnormalSpO2) alertText+="SpO₂ "; 
-    if(abnormalTemp) alertText+="Temp "; 
-    if(abnormalAcc) alertText+="Acceleration ";
+    if(lastValues[3]<50 || lastValues[3]>120) alertText+="BPM ";
+    if(lastValues[2]<92) alertText+="SpO₂ ";
+    if(lastValues[1]>38) alertText+="Body Temp ";
+    if(lastValues[4]>20) alertText+="Acceleration ";
+    if(lastValues[5]<18 || lastValues[5]>30) alertText+="Room Temp ";
+    if(lastValues[6]<30 || lastValues[6]>70) alertText+="Humidity ";
     alertBox.innerText=alertText?`⚠ Abnormal: ${alertText}`:"";
     alertBox.style.display=alertText?"block":"none";
 
@@ -151,8 +153,10 @@ function showReport(vitalName,fieldNum,minVal,maxVal){
   let interpretation="Normal";
   if(vitalName==="BPM") interpretation=(value<50||value>120)?"Abnormal BPM":"Normal BPM";
   if(vitalName==="SpO₂") interpretation=(value<92)?"Low SpO₂":"Normal SpO₂";
-  if(vitalName==="Temperature") interpretation=(value>38)?"High Temperature":"Normal Temperature";
+  if(vitalName==="Body Temp") interpretation=(value>38)?"High Body Temp":"Normal Body Temp";
   if(vitalName==="Acceleration") interpretation=(value>20)?"High Activity":"Normal Activity";
+  if(vitalName==="Room Temp") interpretation=(value<18||value>30)?"Abnormal Room Temp":"Normal Room Temp";
+  if(vitalName==="Humidity") interpretation=(value<30||value>70)?"Abnormal Humidity":"Normal Humidity";
   document.getElementById('report-interpretation').innerText="Interpretation: "+interpretation;
 
   loadHistory('today'); // default
@@ -180,7 +184,6 @@ async function loadHistory(range){
     const data=await res.json();
     const values=data.feeds.map(f=>parseFloat(f[`field${vitalField}`]));
     const labels=data.feeds.map(f=>new Date(f.created_at).toLocaleString());
-
     const pointBg = values.map(v=> (v<vitalMin||v>vitalMax)?'red':'lime');
 
     const ctx=document.getElementById('vital-chart').getContext('2d');
@@ -204,24 +207,11 @@ async function loadHistory(range){
         responsive:true,
         maintainAspectRatio:false,
         scales:{
-          y:{ 
-            beginAtZero:false,
-            suggestedMin:vitalMin-5,
-            suggestedMax:vitalMax+5,
-            title:{ display:true, text:'Value'}
-          },
-          x:{
-            title:{ display:true, text:'Time'}
-          }
+          y:{ beginAtZero:false, suggestedMin:vitalMin-5, suggestedMax:vitalMax+5, title:{ display:true, text:'Value'} },
+          x:{ title:{ display:true, text:'Time'} }
         },
         plugins:{
-          tooltip:{
-            callbacks:{
-              label:function(ctx){
-                return ctx.parsed.y+" at "+ctx.label;
-              }
-            }
-          },
+          tooltip:{ callbacks:{ label:function(ctx){ return ctx.parsed.y+" at "+ctx.label; } } },
           legend:{ display:false }
         }
       }
@@ -233,3 +223,4 @@ async function loadHistory(range){
 
 </body>
 </html>
+
